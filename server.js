@@ -8,6 +8,7 @@ for (const f of ['.env.local', '.env']) {
     const m = l.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/); if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, '');
   });
 }
+if (process.env.VERCEL || process.env.NODE_ENV === 'production') { console.error('server.js is for local development only'); process.exit(1); }
 if (process.env.ALLOW_NO_AUTH === undefined) process.env.ALLOW_NO_AUTH = '1'; // local only
 const handler = require('./api/ai.js');
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.json': 'application/json', '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json' };

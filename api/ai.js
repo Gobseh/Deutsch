@@ -170,7 +170,7 @@ module.exports = async (req, res) => {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!process.env.GEMINI_API_KEY) return res.status(500).json({ error: 'GEMINI_API_KEY is not set on the server' });
 
-  if (process.env.ALLOW_NO_AUTH !== '1') {
+  if (process.env.ALLOW_NO_AUTH !== '1' || process.env.VERCEL) { // auth is always required on Vercel
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     if (!token) return res.status(401).json({ error: 'Prihlás sa (Nastavenia → Účet), aby si mohol používať AI' });
     try {
