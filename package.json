@@ -1,0 +1,10 @@
+{
+  "name": "nemcina",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Učenie nemčiny konverzáciou (slovenčina ↔ nemčina) s Gemini",
+  "scripts": {
+    "dev": "node server.js"
+  },
+  "engines": { "node": ">=18" }
+}
