@@ -149,10 +149,17 @@ function pickVoice() {
 }
 function speak(text, rate) {
   if (!('speechSynthesis' in window)) return toast('Prehliadač nepodporuje čítanie nahlas');
-  speechSynthesis.cancel();
+  if (!VOICES.length) loadVoices();
+  const busy = speechSynthesis.speaking || speechSynthesis.pending;
+  speechSynthesis.cancel(); speechSynthesis.resume();
   const u = new SpeechSynthesisUtterance(String(text).replace(/\|/g, '').replace(/<[^>]+>/g, ''));
   u.lang = 'de-DE'; const v = pickVoice(); if (v) u.voice = v; u.rate = rate || S.settings.rate || 0.95;
-  speechSynthesis.speak(u);
+  let started = false; u.onstart = () => { started = true; };
+  u.onerror = e => { if (!['interrupted', 'canceled'].includes(e.error)) toast('Čítanie nahlas zlyhalo (' + e.error + ')'); };
+  window._utt = u; // Chrome: keep a reference so the utterance isn't garbage-collected
+  const go = () => speechSynthesis.speak(u);
+  busy ? setTimeout(go, 80) : go(); // Chrome drops speak() issued right after cancel()
+  setTimeout(() => { if (!started && !speechSynthesis.speaking) toast(VOICES.length ? 'Hlas sa nespustil – skontroluj hlasitosť (na iPhone tichý režim)' : 'Zariadenie nemá nemecký hlas – doinštaluj ho v nastaveniach (Prevod textu na reč)'); }, 2500);
 }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let REC = null;
