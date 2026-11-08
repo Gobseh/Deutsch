@@ -172,7 +172,7 @@ module.exports = async (req, res) => {
 
   if (process.env.ALLOW_NO_AUTH !== '1' || process.env.VERCEL) { // auth is always required on Vercel
     const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    if (!token) return res.status(401).json({ error: 'Prihlás sa (Nastavenia → Účet), aby si mohol používať AI' });
+    if (!token) return res.status(401).json({ error: 'Prihlás sa (Viac → Účet a cloud), aby si mohol používať AI' });
     try {
       const u = await fetch(`${SUPABASE_URL}/auth/v1/user`, { headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${token}` } });
       if (!u.ok) return res.status(401).json({ error: 'Prihlásenie vypršalo – prihlás sa znova' });
