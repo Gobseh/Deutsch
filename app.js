@@ -150,6 +150,7 @@ function pickVoice() {
 /* Reading aloud: device voice first; if the device has no voice for the language or it does not start,
    fall back to the Gemini AI voice (server /api/ai {tts}). Settings → "Hlas na čítanie" can force one. */
 const HAS_TTS = 'speechSynthesis' in window;
+const IS_IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
 const skVoice = () => (HAS_TTS && speechSynthesis.getVoices() || []).find(v => /^sk/i.test(v.lang));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const TTS_CACHE = new Map();
@@ -189,7 +190,9 @@ async function tts(text, lang = 'de-DE', rate) {
   text = String(text || '').replace(/\|/g, '').replace(/<[^>]+>/g, '').trim(); if (!text) return;
   rate = rate || S.settings.rate || 0.95;
   const busy = HAS_TTS && (speechSynthesis.speaking || speechSynthesis.pending);
-  ttsStop(); const seq = ttsSeq, mode = S.settings.voiceMode || 'auto';
+  ttsStop(); const seq = ttsSeq;
+  // iPhone/iPad: the device voice is silently muted by the ring/silent switch, so "auto" uses the AI voice there
+  const mode = (S.settings.voiceMode || 'auto') === 'auto' && IS_IOS ? 'ai' : (S.settings.voiceMode || 'auto');
   if (HAS_TTS && !VOICES.length) loadVoices();
   const device = HAS_TTS && mode !== 'ai' && (mode === 'device' || (lang.startsWith('sk') ? skVoice() : VOICES.length));
   if (device) {
@@ -590,7 +593,7 @@ function vSettings() {
     <div class="field"><label>Nových kariet naraz</label>${seg('newPerDay', [[6, '6'], [12, '12'], [20, '20']])}</div>
     <div class="field"><label>Koľko slovenčiny v rozhovore</label>${seg('skRatio', [['low', 'Takmer nič'], ['mid', 'Občas vysvetlí'], ['high', 'Viac pomoci']])}</div>
     <div class="field"><label>Rýchlosť čítania nahlas</label>${seg('rate', [[0.8, 'Pomaly'], [0.95, 'Normálne'], [1.1, 'Rýchlo']])}</div>
-    <div class="field"><label>Hlas na čítanie</label>${seg('voiceMode', [['auto', 'Automaticky'], ['ai', 'AI hlas'], ['device', 'Hlas zariadenia']])}<p class="mut small" style="margin:6px 0 0">Automaticky: hlas zariadenia, a ak nefunguje, AI hlas (Gemini). AI hlas znie prirodzenejšie a funguje aj v tichom režime iPhonu.</p></div>
+    <div class="field"><label>Hlas na čítanie</label>${seg('voiceMode', [['auto', 'Automaticky'], ['ai', 'AI hlas'], ['device', 'Hlas zariadenia']])}<p class="mut small" style="margin:6px 0 0">Automaticky: na iPhone AI hlas (Gemini), inde hlas zariadenia a ak nefunguje, AI hlas. AI hlas znie prirodzenejšie a hrá aj v tichom režime iPhonu.</p></div>
     <div class="field"><label>Hlas prehliadača (čítanie fráz)</label><select data-set="voiceName"><option value="">Automaticky (najlepší dostupný)</option>${VOICES.map(v => `<option ${v.name === s.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Vzhľad</label>${seg('theme', [['auto', 'Automaticky'], ['light', 'Svetlý'], ['dark', 'Tmavý']])}</div>
    </div>
