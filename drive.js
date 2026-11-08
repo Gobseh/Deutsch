@@ -43,15 +43,7 @@ window.driveContext = ({ weakItems, lastMistakes }) => {
 };
 
 /* ---------- listening loop (no AI, works offline) ---------- */
-const skVoice = () => (speechSynthesis.getVoices() || []).find(v => /^sk/i.test(v.lang));
-function say(text, lang, rate) {
-  return new Promise(res => {
-    const u = new SpeechSynthesisUtterance(String(text).replace(/\|/g, ''));
-    u.lang = lang; u.rate = rate;
-    const v = lang.startsWith('sk') ? skVoice() : pickVoice(); if (v) u.voice = v;
-    u.onend = u.onerror = () => res(); speechSynthesis.speak(u);
-  });
-}
+const say = (text, lang, rate) => tts(text, lang, rate);
 const wait = ms => new Promise(r => setTimeout(r, ms));
 function listenItems() {
   const t = DRIVE.topic, cat = catById(t);
@@ -60,7 +52,6 @@ function listenItems() {
   return pool.sort((a, b) => score(a) - score(b)).slice(0, 40);
 }
 async function listenStart() {
-  if (!('speechSynthesis' in window)) return toast('Prehliadač nepodporuje čítanie nahlas');
   if (LV.state !== 'off') lvStop(true);
   const items = listenItems(); if (!items.length) return toast('V tejto téme nie sú frázy');
   const L = DRIVE.loop = { items, i: 0, phase: '', paused: false, token: Math.random() };
@@ -83,7 +74,7 @@ async function listenStart() {
   }
   if (DRIVE.loop === L) { if (!L.stop) await say(`Hotovo. Prešli sme ${L.i} fráz.`, 'sk-SK', 1); DRIVE.loop = null; DRIVE.mode = null; render(); keepAwake(); }
 }
-function listenStop(quiet) { const L = DRIVE.loop; if (!L) return; L.stop = true; DRIVE.loop = null; speechSynthesis.cancel(); DRIVE.mode = null; if (!quiet) render(); keepAwake(); }
+function listenStop(quiet) { const L = DRIVE.loop; if (!L) return; L.stop = true; DRIVE.loop = null; ttsStop(); DRIVE.mode = null; if (!quiet) render(); keepAwake(); }
 window.listenStop = listenStop;
 
 /* ---------- home view ---------- */
@@ -162,8 +153,8 @@ window.talkAction = (a, b, e) => {
     case 'drive-quiz': DRIVE.mode = 'quiz'; TALK.scenario = null; lvStart(); break;
     case 'drive-grammar': DRIVE.mode = 'grammar'; TALK.scenario = null; lvStart(); break;
     case 'drive-listen': listenStart(); break;
-    case 'drive-pause': if (DRIVE.loop) { DRIVE.loop.paused = !DRIVE.loop.paused; if (DRIVE.loop.paused) speechSynthesis.cancel(); renderDriveNow(); } break;
-    case 'drive-next': if (DRIVE.loop) { DRIVE.loop.i++; DRIVE.loop.token = Math.random(); speechSynthesis.cancel(); } break;
+    case 'drive-pause': if (DRIVE.loop) { DRIVE.loop.paused = !DRIVE.loop.paused; if (DRIVE.loop.paused) ttsStop(); renderDriveNow(); } break;
+    case 'drive-next': if (DRIVE.loop) { DRIVE.loop.i++; DRIVE.loop.token = Math.random(); ttsStop(); } break;
     case 'drive-stop': listenStop(); break;
     case 'drive-read': { const s = S.sessions[0]; if (s?.summary) say(s.summary, 'sk-SK', 1); break; }
     case 'voice': if (LV.state === 'off' && ROUTE.name === 'home' && !DRIVE.mode) DRIVE.mode = 'talk'; prevDrive?.(a, b, e); break;

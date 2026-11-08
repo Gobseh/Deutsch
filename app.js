@@ -147,20 +147,60 @@ function pickVoice() {
   for (const p of pref) { const v = VOICES.find(v => p.test(v.name) && /de-DE/i.test(v.lang)); if (v) return v; }
   return VOICES.find(v => /de-DE/i.test(v.lang)) || VOICES[0];
 }
-function speak(text, rate) {
-  if (!('speechSynthesis' in window)) return toast('Prehliadač nepodporuje čítanie nahlas');
-  if (!VOICES.length) loadVoices();
-  const busy = speechSynthesis.speaking || speechSynthesis.pending;
-  speechSynthesis.cancel(); speechSynthesis.resume();
-  const u = new SpeechSynthesisUtterance(String(text).replace(/\|/g, '').replace(/<[^>]+>/g, ''));
-  u.lang = 'de-DE'; const v = pickVoice(); if (v) u.voice = v; u.rate = rate || S.settings.rate || 0.95;
-  let started = false; u.onstart = () => { started = true; };
-  u.onerror = e => { if (!['interrupted', 'canceled'].includes(e.error)) toast('Čítanie nahlas zlyhalo (' + e.error + ')'); };
-  window._utt = u; // Chrome: keep a reference so the utterance isn't garbage-collected
-  const go = () => speechSynthesis.speak(u);
-  busy ? setTimeout(go, 80) : go(); // Chrome drops speak() issued right after cancel()
-  setTimeout(() => { if (!started && !speechSynthesis.speaking) toast(VOICES.length ? 'Hlas sa nespustil – skontroluj hlasitosť (na iPhone tichý režim)' : 'Zariadenie nemá nemecký hlas – doinštaluj ho v nastaveniach (Prevod textu na reč)'); }, 2500);
+/* Reading aloud: device voice first; if the device has no voice for the language or it does not start,
+   fall back to the Gemini AI voice (server /api/ai {tts}). Settings → "Hlas na čítanie" can force one. */
+const HAS_TTS = 'speechSynthesis' in window;
+const skVoice = () => (HAS_TTS && speechSynthesis.getVoices() || []).find(v => /^sk/i.test(v.lang));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const TTS_CACHE = new Map();
+let ttsAudio = null, ttsSeq = 0;
+function audioEl() { if (!ttsAudio) { ttsAudio = new Audio(); ttsAudio.setAttribute('playsinline', ''); } return ttsAudio; }
+// iOS/Android allow later programmatic play() only on an element that was first played inside a tap
+document.addEventListener('pointerdown', () => { const a = audioEl(); if (a._unlocked) return; a._unlocked = true;
+  a.src = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA='; a.play().catch(() => {}); }, true);
+function wavUrl(b64, sr) {
+  const pcm = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), h = new DataView(new ArrayBuffer(44));
+  const w = (o, s) => [...s].forEach((c, i) => h.setUint8(o + i, c.charCodeAt(0)));
+  w(0, 'RIFF'); h.setUint32(4, 36 + pcm.length, true); w(8, 'WAVE'); w(12, 'fmt '); h.setUint32(16, 16, true); h.setUint16(20, 1, true); h.setUint16(22, 1, true);
+  h.setUint32(24, sr, true); h.setUint32(28, sr * 2, true); h.setUint16(32, 2, true); h.setUint16(34, 16, true); w(36, 'data'); h.setUint32(40, pcm.length, true);
+  return URL.createObjectURL(new Blob([h, pcm], { type: 'audio/wav' }));
 }
+function ttsStop() { ttsSeq++; if (HAS_TTS) speechSynthesis.cancel(); if (ttsAudio && !ttsAudio.paused) ttsAudio.pause(); }
+function deviceSay(text, lang, rate) { // resolves 'ok' (spoken or interrupted) or 'fail' (never started)
+  return new Promise(res => {
+    const u = new SpeechSynthesisUtterance(text); u.lang = lang; u.rate = rate;
+    const v = lang.startsWith('sk') ? skVoice() : pickVoice(); if (v) u.voice = v;
+    let started = false, done = false; const fin = r => { if (!done) { done = true; res(r); } };
+    u.onstart = () => { started = true; }; u.onend = () => fin('ok');
+    u.onerror = e => fin(started || ['interrupted', 'canceled'].includes(e.error) ? 'ok' : 'fail');
+    window._utt = u; // Chrome: keep a reference so the utterance isn't garbage-collected
+    speechSynthesis.resume(); speechSynthesis.speak(u);
+    setTimeout(() => { if (!started && !speechSynthesis.speaking) { fin('fail'); speechSynthesis.cancel(); } }, 1800);
+  });
+}
+async function aiSay(text, lang, rate, seq) {
+  const key = lang.slice(0, 2) + '|' + text; let url = TTS_CACHE.get(key);
+  if (!url) { const j = await window.api({ tts: text, lang }, 30000); url = wavUrl(j.audio, j.rate || 24000); TTS_CACHE.set(key, url); }
+  if (seq !== ttsSeq) return;
+  const a = audioEl(); a.src = url; a.playbackRate = Math.max(0.7, Math.min(1.3, rate / 0.95));
+  await new Promise(res => { a.onended = a.onpause = a.onerror = () => res(); a.play().catch(() => { toast('Prehrávanie zablokované – ťukni ešte raz'); res(); }); });
+}
+async function tts(text, lang = 'de-DE', rate) {
+  text = String(text || '').replace(/\|/g, '').replace(/<[^>]+>/g, '').trim(); if (!text) return;
+  rate = rate || S.settings.rate || 0.95;
+  const busy = HAS_TTS && (speechSynthesis.speaking || speechSynthesis.pending);
+  ttsStop(); const seq = ttsSeq, mode = S.settings.voiceMode || 'auto';
+  if (HAS_TTS && !VOICES.length) loadVoices();
+  const device = HAS_TTS && mode !== 'ai' && (mode === 'device' || (lang.startsWith('sk') ? skVoice() : VOICES.length));
+  if (device) {
+    if (busy) await sleep(80); // Chrome drops speak() issued right after cancel()
+    if (seq !== ttsSeq) return;
+    if (await deviceSay(text, lang, rate) === 'ok' || seq !== ttsSeq) return;
+    if (mode === 'device') return toast('Hlas zariadenia sa nespustil – skús Viac → Hlas na čítanie → AI hlas');
+  }
+  try { await aiSay(text, lang, rate, seq); } catch (e) { if (seq === ttsSeq) toast('Čítanie nahlas: ' + e.message); }
+}
+function speak(text, rate) { tts(text, 'de-DE', rate); }
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let REC = null;
 function dictate(onText, lang = 'de-DE', btn) {
@@ -550,6 +590,7 @@ function vSettings() {
     <div class="field"><label>Nových kariet naraz</label>${seg('newPerDay', [[6, '6'], [12, '12'], [20, '20']])}</div>
     <div class="field"><label>Koľko slovenčiny v rozhovore</label>${seg('skRatio', [['low', 'Takmer nič'], ['mid', 'Občas vysvetlí'], ['high', 'Viac pomoci']])}</div>
     <div class="field"><label>Rýchlosť čítania nahlas</label>${seg('rate', [[0.8, 'Pomaly'], [0.95, 'Normálne'], [1.1, 'Rýchlo']])}</div>
+    <div class="field"><label>Hlas na čítanie</label>${seg('voiceMode', [['auto', 'Automaticky'], ['ai', 'AI hlas'], ['device', 'Hlas zariadenia']])}<p class="mut small" style="margin:6px 0 0">Automaticky: hlas zariadenia, a ak nefunguje, AI hlas (Gemini). AI hlas znie prirodzenejšie a funguje aj v tichom režime iPhonu.</p></div>
     <div class="field"><label>Hlas prehliadača (čítanie fráz)</label><select data-set="voiceName"><option value="">Automaticky (najlepší dostupný)</option>${VOICES.map(v => `<option ${v.name === s.voiceName ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></div>
     <div class="field"><label>Vzhľad</label>${seg('theme', [['auto', 'Automaticky'], ['light', 'Svetlý'], ['dark', 'Tmavý']])}</div>
    </div>

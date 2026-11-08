@@ -8,6 +8,7 @@ const MODEL = process.env.GEMINI_MODEL || 'gemini-flash-latest';
 const FALLBACKS = (process.env.GEMINI_FALLBACK_MODELS || 'gemini-flash-lite-latest,gemini-2.5-flash').split(',').map(s => s.trim()).filter(Boolean);
 const LIVE_MODEL = process.env.GEMINI_LIVE_MODEL || 'gemini-3.8-live';
 const LIVE_VOICE = process.env.GEMINI_LIVE_VOICE || 'Kore';
+const TTS_MODELS = (process.env.GEMINI_TTS_MODELS || 'gemini-2.5-flash-preview-tts,gemini-2.5-pro-preview-tts').split(',').map(s => s.trim()).filter(Boolean);
 const busy = (status, j) => status === 503 || status === 429 || status === 500 || /overloaded|high demand|unavailable|try again/i.test(j?.error?.message || '');
 const THINK = { minimal: [{ thinkingLevel: 'minimal' }, { thinkingBudget: 0 }, null], low: [{ thinkingLevel: 'low' }, { thinkingBudget: 512 }, null] };
 const thinkOk = {};
@@ -158,6 +159,30 @@ async function liveToken(res) {
   }
 }
 
+// Reading aloud with the Gemini voice (fallback when the phone has no German/Slovak voice).
+async function tts(body, res) {
+  const text = String(body.tts || '').replace(/\s+/g, ' ').trim().slice(0, 600);
+  if (!text) return res.status(400).json({ error: 'Missing text' });
+  const sk = /^sk/i.test(String(body.lang || ''));
+  const prompt = (sk ? 'Read aloud in Slovak, clearly and naturally: ' : 'Read aloud in standard German, clearly and naturally: ') + text;
+  let last = '';
+  for (const model of TTS_MODELS) {
+    try {
+      const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': process.env.GEMINI_API_KEY },
+        body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }], generationConfig: { responseModalities: ['AUDIO'], speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: LIVE_VOICE } } } } }),
+        signal: AbortSignal.timeout(25000),
+      });
+      const j = await r.json().catch(() => ({}));
+      const part = (j.candidates?.[0]?.content?.parts || []).find(p => p.inlineData?.data);
+      if (r.ok && part) return res.status(200).json({ audio: part.inlineData.data, rate: +((part.inlineData.mimeType || '').match(/rate=(\d+)/) || [])[1] || 24000, model });
+      last = j.error?.message || `HTTP ${r.status}`;
+    } catch (e) { last = e.name === 'TimeoutError' ? 'timeout' : 'network error'; }
+  }
+  return res.status(502).json({ error: `AI hlas: ${last}` });
+}
+
 async function readBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
   if (typeof req.body === 'string') return JSON.parse(req.body || '{}');
@@ -188,6 +213,7 @@ module.exports = async (req, res) => {
   let body;
   try { body = await readBody(req); } catch (e) { return res.status(400).json({ error: 'Bad request' }); }
   if (body?.live) return liveToken(res);
+  if (typeof body?.tts === 'string') return tts(body, res);
   if (typeof body?.message === 'string') return chat(body, res);
   if (typeof body?.json === 'string') return json(body, res);
   return res.status(400).json({ error: 'Unknown request' });

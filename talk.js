@@ -139,7 +139,7 @@ function lvMic() {
 }
 async function lvStart() {
   if (LV.state !== 'off') return;
-  window.listenStop?.(true);
+  window.listenStop?.(true); window.ttsStop?.();
   if (!/^https?:/.test(location.protocol)) return toast('Hlasový rozhovor funguje len cez server (npm run dev / Vercel)');
   const AC = window.AudioContext || window.webkitAudioContext; const ctx = LV.ctx = new AC(); ctx.resume?.(); LV.next = 0;
   LV.an = ctx.createAnalyser(); LV.an.fftSize = 1024; LV.an.connect(ctx.destination);
